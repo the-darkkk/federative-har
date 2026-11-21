@@ -1,0 +1,33 @@
+# Datasets and raw files
+data/raw/
+data/processed/
+
+# Dataset artifacts & binary formats
+*.npz
+*.bin
+*.db
+*.sqlite3
+
+# Compiled binaries and libraries
+*.dll
+*.so
+*.dylib
+*.exe
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

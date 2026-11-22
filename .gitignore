@@ -10,6 +10,7 @@ core/build/
 *.bin
 *.db
 *.sqlite3
+server/storage/*.bin
 
 # Compiled binaries and libraries
 *.dll

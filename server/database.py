@@ -13,12 +13,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 from server import config
 
-connect_args = {}
-if config.DATABASE_URL.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
-
-engine = create_engine(config.DATABASE_URL, connect_args=connect_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+_engine = None
+_session_factory = None
 
 
 class Base(DeclarativeBase):
@@ -84,8 +80,37 @@ class TelemetryLog(Base):
     )
 
 
+def get_engine():
+    global _engine
+    if _engine is None:
+        connect_args = {}
+        if config.DATABASE_URL.startswith("sqlite"):
+            connect_args["check_same_thread"] = False
+        _engine = create_engine(config.DATABASE_URL, connect_args=connect_args)
+    return _engine
+
+
+def get_session_factory():
+    global _session_factory
+    if _session_factory is None:
+        _session_factory = sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
+    return _session_factory
+
+
+def SessionLocal() -> Session:
+    return get_session_factory()()
+
+
+def reset_db_engine():
+    global _engine, _session_factory
+    if _engine is not None:
+        _engine.dispose()
+    _engine = None
+    _session_factory = None
+
+
 def init_db(target_engine=None) -> None:
-    eng = target_engine if target_engine is not None else engine
+    eng = target_engine if target_engine is not None else get_engine()
     Base.metadata.create_all(bind=eng)
 
 

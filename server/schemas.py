@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -11,6 +11,8 @@ class HealthResponse(BaseModel):
 
 
 class ModelMetadata(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     version: int = Field(..., description="Model version index (0, 1, 2...)")
     in_dim: int = Field(..., description="Input feature dimension (128)")
     hid_dim: int = Field(..., description="Hidden layer dimension (64)")
@@ -22,9 +24,6 @@ class ModelMetadata(BaseModel):
     participants_count: int = Field(..., description="Number of contributing clients in this round")
     total_samples: int = Field(..., description="Total training samples aggregated across clients")
     created_at: datetime = Field(..., description="UTC creation timestamp")
-
-    class Config:
-        from_attributes = True
 
 
 class SubmitResponse(BaseModel):
@@ -47,6 +46,8 @@ class RoundStatusResponse(BaseModel):
 
 
 class TelemetryItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     round_version: int
     client_id: str
@@ -58,6 +59,3 @@ class TelemetryItem(BaseModel):
     status: str
     detail: Optional[str]
     created_at: datetime
-
-    class Config:
-        from_attributes = True

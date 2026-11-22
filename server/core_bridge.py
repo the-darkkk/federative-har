@@ -35,9 +35,11 @@ def get_core_lib():
 
     lib = ctypes.CDLL(str(lib_path))
 
+    # 1. int fh_weights_len(int in_dim, int hid_dim, int out_dim)
     lib.fh_weights_len.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]
     lib.fh_weights_len.restype = ctypes.c_int
 
+    # 2. void fh_init_weights(float* weights, int in_dim, int hid_dim, int out_dim, unsigned int seed)
     lib.fh_init_weights.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS, WRITEABLE"),
         ctypes.c_int,
@@ -47,6 +49,16 @@ def get_core_lib():
     ]
     lib.fh_init_weights.restype = None
 
+    # 3. void fh_preprocess_window(const float* raw_xyz, float* out_features, int window_len, float scale_to_g)
+    lib.fh_preprocess_window.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS"),
+        np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS, WRITEABLE"),
+        ctypes.c_int,
+        ctypes.c_float,
+    ]
+    lib.fh_preprocess_window.restype = None
+
+    # 4. void fh_predict(const float* weights, const float* features, float* probs_out, int in_dim, int hid_dim, int out_dim)
     lib.fh_predict.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS"),
         np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS"),
@@ -56,6 +68,19 @@ def get_core_lib():
         ctypes.c_int,
     ]
     lib.fh_predict.restype = None
+
+    # 5. float fh_train_batch(float* weights, const float* X, const int* y, int batch_size, int in_dim, int hid_dim, int out_dim, float lr)
+    lib.fh_train_batch.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS, WRITEABLE"),
+        np.ctypeslib.ndpointer(dtype=np.float32, ndim=2, flags="C_CONTIGUOUS"),
+        np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags="C_CONTIGUOUS"),
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_float,
+    ]
+    lib.fh_train_batch.restype = ctypes.c_float
 
     _core_lib = lib
     return _core_lib

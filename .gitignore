@@ -2,6 +2,9 @@
 data/raw/
 data/processed/
 
+# Core build directory
+core/build/
+
 # Dataset artifacts & binary formats
 *.npz
 *.bin

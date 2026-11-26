@@ -1,30 +1,19 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:flutter_app/services/comm_logger.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:material_ui/material_ui.dart';
-
-import 'package:flutter_app/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('CommLogger records, copies, and clears timestamped entries', () {
+    final logger = CommLogger();
+    expect(logger.entries, isEmpty);
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    logger.log('Connected to server');
+    logger.log('Downloaded model v1');
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    expect(logger.entries.length, 2);
+    expect(logger.entries[0], contains('Connected to server'));
+    expect(logger.copyAll(), contains('Downloaded model v1'));
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    logger.clear();
+    expect(logger.entries, isEmpty);
   });
 }

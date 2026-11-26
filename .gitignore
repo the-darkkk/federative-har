@@ -35,3 +35,13 @@ env/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Flutter & Android build artifacts
+client/flutter_app/build/
+client/flutter_app/.dart_tool/
+client/flutter_app/.flutter-plugins*
+client/flutter_app/android/.gradle/
+client/flutter_app/android/local.properties
+client/flutter_app/android/app/.cxx/
+*.apk
+*.aab

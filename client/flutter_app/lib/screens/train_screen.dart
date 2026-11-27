@@ -1,29 +1,28 @@
-import 'dart:convert';
 import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/services.dart' show rootBundle;
 
 import 'package:flutter_app/core/native_har_bridge.dart';
 import 'package:flutter_app/services/comm_logger.dart';
+import 'package:flutter_app/services/dataset_manager.dart';
 import 'package:flutter_app/services/fl_api_client.dart';
 import 'package:flutter_app/services/model_manager.dart';
 import 'package:flutter_app/services/sensor_service.dart';
 
-enum _TrainingSource { demoBundle, liveCaptured }
+enum _TrainingSource { datasetNpz, liveSensor }
 
 class TrainScreen extends StatefulWidget {
-  final NativeHarBridge bridge;
   final ModelManager modelManager;
+  final DatasetManager datasetManager;
   final SensorService sensorService;
   final FlApiClient apiClient;
   final CommLogger logger;
 
   const TrainScreen({
     super.key,
-    required this.bridge,
     required this.modelManager,
+    required this.datasetManager,
     required this.sensorService,
     required this.apiClient,
     required this.logger,
@@ -34,7 +33,7 @@ class TrainScreen extends StatefulWidget {
 }
 
 class _TrainScreenState extends State<TrainScreen> {
-  _TrainingSource _source = _TrainingSource.demoBundle;
+  _TrainingSource _source = _TrainingSource.datasetNpz;
   int _epochs = 5;
   int _liveLabelIndex = 2; // Walking default
   bool _isTraining = false;
@@ -45,52 +44,39 @@ class _TrainScreenState extends State<TrainScreen> {
   double? _trainTimeMs;
   String? _submitStatus;
 
-  Future<({Float32List features, Int32List labels, String inputMode})>
+  Future<({Float32List flatX, Int32List labels, String inputMode})>
       _prepareTrainingData() async {
-    if (_source == _TrainingSource.liveCaptured) {
+    if (_source == _TrainingSource.liveSensor) {
       final windows = widget.sensorService.capturedFeatureWindows;
       if (windows.isEmpty) {
-        throw StateError('No live sensor windows buffered yet. Keep Monitor running.');
+        throw StateError('No live sensor windows captured yet.');
       }
       final n = windows.length;
       final flat = Float32List(n * HarConstants.inDim);
       final labels = Int32List(n);
       for (var i = 0; i < n; i++) {
-        flat.setRange(i * HarConstants.inDim, (i + 1) * HarConstants.inDim, windows[i]);
+        flat.setRange(
+          i * HarConstants.inDim,
+          (i + 1) * HarConstants.inDim,
+          windows[i],
+        );
         labels[i] = _liveLabelIndex;
       }
-      return (features: flat, labels: labels, inputMode: 'sensor');
+      return (flatX: flat, labels: labels, inputMode: 'sensor');
     }
 
-    // Bundled MotionSense demo asset (already in g units, scaleToG = 1.0)
-    final jsonStr = await rootBundle.loadString('assets/mobile_demo_bundle.json');
-    final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
-    final rawWindows = decoded['windows_xyz'] as List<dynamic>;
-    final rawLabels = decoded['labels'] as List<dynamic>;
+    final npz = await widget.datasetManager.loadSelectedDataset();
+    return (flatX: npz.flatX, labels: npz.labels, inputMode: 'dataset');
+  }
 
-    final n = rawLabels.length;
-    final flat = Float32List(n * HarConstants.inDim);
-    final labels = Int32List(n);
-
-    for (var wIdx = 0; wIdx < n; wIdx++) {
-      final win = rawWindows[wIdx] as List<dynamic>;
-      final interleaved = List<double>.filled(HarConstants.inDim * 3, 0.0);
-      for (var t = 0; t < HarConstants.inDim; t++) {
-        final xyz = win[t] as List<dynamic>;
-        interleaved[t * 3 + 0] = (xyz[0] as num).toDouble();
-        interleaved[t * 3 + 1] = (xyz[1] as num).toDouble();
-        interleaved[t * 3 + 2] = (xyz[2] as num).toDouble();
-      }
-      final mags = widget.bridge.preprocessWindow(
-        interleaved,
-        windowLen: HarConstants.inDim,
-        scaleToG: 1.0,
+  Future<void> _importNpz() async {
+    final count = await widget.datasetManager.importNpzFiles();
+    if (!mounted) return;
+    if (count > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Imported $count .npz dataset(s)')),
       );
-      flat.setRange(wIdx * HarConstants.inDim, (wIdx + 1) * HarConstants.inDim, mags);
-      labels[wIdx] = (rawLabels[wIdx] as num).toInt();
     }
-
-    return (features: flat, labels: labels, inputMode: 'dataset');
   }
 
   Future<void> _trainAndSubmit() async {
@@ -107,27 +93,27 @@ class _TrainScreenState extends State<TrainScreen> {
       final prepared = await _prepareTrainingData();
       final sampleCount = prepared.labels.length;
       final epochs = _epochs;
-      final weightsCopy = Float32List.fromList(baseWeights);
-      final flatFeatures = prepared.features;
-      final labels = prepared.labels;
       final seed = widget.modelManager.clientId.hashCode ^ baseVersion;
+
+      final params = TrainTaskParams(
+        initialWeights: Float32List.fromList(baseWeights),
+        flatX: prepared.flatX,
+        labels: prepared.labels,
+        numSamples: sampleCount,
+        inDim: HarConstants.inDim,
+        hidDim: HarConstants.hidDim,
+        outDim: HarConstants.outDim,
+        epochs: epochs,
+        batchSize: 32,
+        learningRate: 0.05,
+        seed: seed,
+      );
 
       widget.logger.log(
         'Starting on-device training: $sampleCount windows (${prepared.inputMode}), $epochs epochs...',
       );
 
-      final result = await Isolate.run(() {
-        final isolateBridge = NativeHarBridge();
-        return isolateBridge.trainEpochs(
-          initialWeights: weightsCopy,
-          flatFeatures: flatFeatures,
-          labels: labels,
-          epochs: epochs,
-          batchSize: 32,
-          lr: 0.05,
-          seed: seed,
-        );
-      });
+      final result = await Isolate.run(() => runTrainingIsolate(params));
 
       widget.logger.log(
         'Trained $epochs epochs in ${result.trainTimeMs.toStringAsFixed(1)}ms '
@@ -172,9 +158,22 @@ class _TrainScreenState extends State<TrainScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.modelManager, widget.sensorService]),
+      listenable: Listenable.merge([
+        widget.modelManager,
+        widget.datasetManager,
+        widget.sensorService,
+      ]),
       builder: (context, _) {
-        final capturedCount = widget.sensorService.capturedFeatureWindows.length;
+        final datasets = widget.datasetManager.availableDatasets;
+        final selected = widget.datasetManager.selectedDataset;
+        final capturedCount =
+            widget.sensorService.capturedFeatureWindows.length;
+
+        final canTrain = !_isTraining &&
+            widget.modelManager.weights != null &&
+            ((_source == _TrainingSource.datasetNpz && selected != null) ||
+                (_source == _TrainingSource.liveSensor && capturedCount > 0));
+
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -187,35 +186,144 @@ class _TrainScreenState extends State<TrainScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'On-Device Training Dataset',
+                      'On-Device Training Source',
                       style: theme.textTheme.titleMedium,
                     ),
                     const SizedBox(height: 12),
-                    SegmentedButton<_TrainingSource>(
-                      segments: [
-                        const ButtonSegment(
-                          value: _TrainingSource.demoBundle,
-                          label: Text('Demo Bundle (180)'),
-                          icon: Icon(Icons.dataset),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<_TrainingSource>(
+                        segments: const [
+                          ButtonSegment(
+                            value: _TrainingSource.datasetNpz,
+                            label: Text('Dataset (.npz)'),
+                            icon: Icon(Icons.folder_zip_outlined),
+                          ),
+                          ButtonSegment(
+                            value: _TrainingSource.liveSensor,
+                            label: Text('Live Sensor'),
+                            icon: Icon(Icons.sensors),
+                          ),
+                        ],
+                        selected: {_source},
+                        onSelectionChanged: _isTraining
+                            ? null
+                            : (selection) =>
+                                setState(() => _source = selection.first),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    if (_source == _TrainingSource.datasetNpz) ...[
+                      if (datasets.isEmpty)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: theme.colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'No .npz files found. Transfer client_*.npz files from data/processed/ to your phone and tap Import .npz.',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                onPressed: _isTraining ? null : _importNpz,
+                                icon: const Icon(Icons.file_upload_outlined),
+                                label: const Text('Import .npz'),
+                              ),
+                            ],
+                          ),
+                        )
+                      else ...[
+                        DropdownButtonFormField<String>(
+                          initialValue: selected?.name,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Selected Dataset',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          items: datasets
+                              .map(
+                                (d) => DropdownMenuItem(
+                                  value: d.name,
+                                  child: Text(
+                                    d.displayLabel,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _isTraining
+                              ? null
+                              : (val) =>
+                                  widget.datasetManager.selectDataset(val),
                         ),
-                        ButtonSegment(
-                          value: _TrainingSource.liveCaptured,
-                          label: Text('Live ($capturedCount)'),
-                          icon: const Icon(Icons.sensors),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: _isTraining ? null : _importNpz,
+                              icon: const Icon(
+                                Icons.file_upload_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('Import .npz'),
+                            ),
+                            const Spacer(),
+                            if (selected != null)
+                              TextButton.icon(
+                                onPressed: _isTraining
+                                    ? null
+                                    : () => widget.datasetManager
+                                        .deleteDataset(selected.name),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 18,
+                                ),
+                                label: const Text('Remove'),
+                              ),
+                          ],
                         ),
                       ],
-                      selected: {_source},
-                      onSelectionChanged: _isTraining
-                          ? null
-                          : (selection) =>
-                              setState(() => _source = selection.first),
-                    ),
-                    if (_source == _TrainingSource.liveCaptured) ...[
-                      const SizedBox(height: 12),
+                    ] else ...[
+                      Text(
+                        'Captures live 50 Hz accelerometer windows from this phone and tags them with the selected activity below.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text(
+                            'Captured windows: $capturedCount / 60',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: _isTraining || capturedCount == 0
+                                ? null
+                                : widget.sensorService.clearCapturedWindows,
+                            icon: const Icon(Icons.clear, size: 18),
+                            label: const Text('Clear'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       DropdownButtonFormField<int>(
                         initialValue: _liveLabelIndex,
                         decoration: const InputDecoration(
-                          labelText: 'Activity Label for Captured Windows',
+                          labelText: 'Activity Label',
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
@@ -239,7 +347,7 @@ class _TrainScreenState extends State<TrainScreen> {
                     Row(
                       children: [
                         Text(
-                          'Local Epochs: $_epochs',
+                          'Epochs: $_epochs',
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
@@ -262,7 +370,7 @@ class _TrainScreenState extends State<TrainScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: _isTraining ? null : _trainAndSubmit,
+                        onPressed: canTrain ? _trainAndSubmit : null,
                         icon: _isTraining
                             ? const SizedBox(
                                 width: 18,
@@ -319,7 +427,7 @@ class _TrainScreenState extends State<TrainScreen> {
                             value: '${(_postAcc! * 100).toStringAsFixed(1)}%',
                           ),
                           _MetricBox(
-                            label: 'Final Loss',
+                            label: 'Loss',
                             value: _finalLoss!.toStringAsFixed(4),
                           ),
                           _MetricBox(

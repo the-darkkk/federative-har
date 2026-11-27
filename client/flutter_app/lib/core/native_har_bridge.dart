@@ -92,6 +92,144 @@ class HarConstants {
   ];
 }
 
+class TrainTaskParams {
+  final Float32List initialWeights;
+  final Float32List flatX;
+  final Int32List labels;
+  final int numSamples;
+  final int inDim;
+  final int hidDim;
+  final int outDim;
+  final int epochs;
+  final int batchSize;
+  final double learningRate;
+  final int seed;
+
+  const TrainTaskParams({
+    required this.initialWeights,
+    required this.flatX,
+    required this.labels,
+    required this.numSamples,
+    this.inDim = HarConstants.inDim,
+    this.hidDim = HarConstants.hidDim,
+    this.outDim = HarConstants.outDim,
+    required this.epochs,
+    this.batchSize = 32,
+    this.learningRate = 0.05,
+    this.seed = 42,
+  });
+}
+
+class TrainTaskResult {
+  final Float32List updatedWeights;
+  final double preAcc;
+  final double postAcc;
+  final double finalLoss;
+  final double trainTimeMs;
+
+  const TrainTaskResult({
+    required this.updatedWeights,
+    required this.preAcc,
+    required this.postAcc,
+    required this.finalLoss,
+    required this.trainTimeMs,
+  });
+}
+
+/// Top-level isolate entry point. Receives only transferable typed-data/primitive fields
+/// and opens its own DynamicLibrary handle inside the worker isolate.
+TrainTaskResult runTrainingIsolate(TrainTaskParams params) {
+  final bridge = NativeHarBridge();
+  final wLen = params.initialWeights.length;
+  final n = params.numSamples;
+  final inDim = params.inDim;
+  final hidDim = params.hidDim;
+  final outDim = params.outDim;
+  final batchSize = params.batchSize;
+
+  final wPtr = calloc<Float>(wLen);
+  final xBatchPtr = calloc<Float>(batchSize * inDim);
+  final yBatchPtr = calloc<Int32>(batchSize);
+
+  try {
+    wPtr.asTypedList(wLen).setAll(0, params.initialWeights);
+
+    final preAcc = bridge.evaluateAccuracy(
+      wPtr,
+      params.flatX,
+      params.labels,
+      inDim: inDim,
+      hidDim: hidDim,
+      outDim: outDim,
+    );
+
+    final rng = Random(params.seed);
+    final indices = List<int>.generate(n, (i) => i);
+    final xBatchView = xBatchPtr.asTypedList(batchSize * inDim);
+    final yBatchView = yBatchPtr.asTypedList(batchSize);
+
+    final sw = Stopwatch()..start();
+    var finalEpochLoss = 0.0;
+
+    for (var epoch = 0; epoch < params.epochs; epoch++) {
+      indices.shuffle(rng);
+      var epochLossSum = 0.0;
+      var numBatches = 0;
+
+      for (var start = 0; start < n; start += batchSize) {
+        final end = (start + batchSize < n) ? start + batchSize : n;
+        final bs = end - start;
+        for (var b = 0; b < bs; b++) {
+          final idx = indices[start + b];
+          xBatchView.setRange(
+            b * inDim,
+            (b + 1) * inDim,
+            params.flatX,
+            idx * inDim,
+          );
+          yBatchView[b] = params.labels[idx];
+        }
+        final loss = bridge._trainBatch(
+          wPtr,
+          xBatchPtr,
+          yBatchPtr,
+          bs,
+          inDim,
+          hidDim,
+          outDim,
+          params.learningRate,
+        );
+        epochLossSum += loss;
+        numBatches++;
+      }
+      finalEpochLoss = epochLossSum / max(1, numBatches);
+    }
+
+    sw.stop();
+    final postAcc = bridge.evaluateAccuracy(
+      wPtr,
+      params.flatX,
+      params.labels,
+      inDim: inDim,
+      hidDim: hidDim,
+      outDim: outDim,
+    );
+    final updatedWeights = Float32List.fromList(wPtr.asTypedList(wLen));
+
+    return TrainTaskResult(
+      updatedWeights: updatedWeights,
+      preAcc: preAcc,
+      postAcc: postAcc,
+      finalLoss: finalEpochLoss,
+      trainTimeMs: sw.elapsedMicroseconds / 1000.0,
+    );
+  } finally {
+    calloc.free(wPtr);
+    calloc.free(xBatchPtr);
+    calloc.free(yBatchPtr);
+  }
+}
+
 class TrainResult {
   final double preAcc;
   final double postAcc;

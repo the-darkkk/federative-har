@@ -90,6 +90,11 @@ class SensorService extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearCapturedWindows() {
+    _capturedFeatureWindows.clear();
+    notifyListeners();
+  }
+
   void _onSensorEvent(AccelerometerEvent event) {
     _x = event.x;
     _y = event.y;

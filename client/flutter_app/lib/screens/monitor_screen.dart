@@ -225,11 +225,14 @@ class _MonitorScreenState extends State<MonitorScreen> {
                       children: [
                         const Icon(Icons.speed, size: 20),
                         const SizedBox(width: 8),
-                        Text(
-                          'Live Accelerometer Telemetry',
-                          style: theme.textTheme.titleMedium,
+                        Expanded(
+                          child: Text(
+                            'Live Accelerometer Telemetry',
+                            style: theme.textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        const Spacer(),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,

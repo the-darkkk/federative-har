@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.federativehar.flutter_app"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -17,7 +17,7 @@ android {
     defaultConfig {
         applicationId = "com.federativehar.flutter_app"
         minSdk = 29
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -44,3 +44,4 @@ kotlin {
 flutter {
     source = "../.."
 }
+

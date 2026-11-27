@@ -5,6 +5,7 @@ import 'package:flutter_app/screens/logs_server_screen.dart';
 import 'package:flutter_app/screens/monitor_screen.dart';
 import 'package:flutter_app/screens/train_screen.dart';
 import 'package:flutter_app/services/comm_logger.dart';
+import 'package:flutter_app/services/dataset_manager.dart';
 import 'package:flutter_app/services/fl_api_client.dart';
 import 'package:flutter_app/services/model_manager.dart';
 import 'package:flutter_app/services/sensor_service.dart';
@@ -44,6 +45,7 @@ class _HomeShellState extends State<HomeShell> {
   late final CommLogger _logger;
   late final NativeHarBridge _bridge;
   late final ModelManager _modelManager;
+  late final DatasetManager _datasetManager;
   late final FlApiClient _apiClient;
   late final SensorService _sensorService;
 
@@ -61,6 +63,7 @@ class _HomeShellState extends State<HomeShell> {
     try {
       _bridge = NativeHarBridge();
       _modelManager = ModelManager(bridge: _bridge, logger: _logger);
+      _datasetManager = DatasetManager(logger: _logger);
       _apiClient = FlApiClient(modelManager: _modelManager, logger: _logger);
       _sensorService = SensorService(
         bridge: _bridge,
@@ -69,6 +72,7 @@ class _HomeShellState extends State<HomeShell> {
       );
 
       await _modelManager.init();
+      await _datasetManager.init();
       _sensorService.start();
 
       if (mounted) {
@@ -86,6 +90,7 @@ class _HomeShellState extends State<HomeShell> {
   void dispose() {
     if (_initialized) {
       _sensorService.dispose();
+      _datasetManager.dispose();
       _modelManager.dispose();
     }
     _logger.dispose();
@@ -119,8 +124,8 @@ class _HomeShellState extends State<HomeShell> {
         apiClient: _apiClient,
       ),
       TrainScreen(
-        bridge: _bridge,
         modelManager: _modelManager,
+        datasetManager: _datasetManager,
         sensorService: _sensorService,
         apiClient: _apiClient,
         logger: _logger,

@@ -113,7 +113,7 @@ class _TrainScreenState extends State<TrainScreen> {
         'Starting on-device training: $sampleCount windows (${prepared.inputMode}), $epochs epochs...',
       );
 
-      final result = await Isolate.run(() => runTrainingIsolate(params));
+      final result = await _runTrainingInBackground(params);
 
       widget.logger.log(
         'Trained $epochs epochs in ${result.trainTimeMs.toStringAsFixed(1)}ms '
@@ -446,6 +446,10 @@ class _TrainScreenState extends State<TrainScreen> {
       },
     );
   }
+}
+
+Future<TrainTaskResult> _runTrainingInBackground(TrainTaskParams params) {
+  return Isolate.run(() => runTrainingIsolate(params));
 }
 
 class _MetricBox extends StatelessWidget {
